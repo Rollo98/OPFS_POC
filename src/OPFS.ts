@@ -1,69 +1,127 @@
-/**
- * Interface defining the standard operations for our File System
- */
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+type OPFSRequest =
+  | { correlationId: string; type: "init" }
+  | { correlationId: string; type: "list" }
+  | { correlationId: string; type: "create"; fileName: string; content: string }
+  | { correlationId: string; type: "read"; fileName: string }
+  | { correlationId: string; type: "update"; fileName: string; content: string }
+  | { correlationId: string; type: "delete"; fileName: string };
+
+interface SuccessResponse<T> {
+  correlationId: string;
+  ok: true;
+  data: T;
+}
+
+interface ErrorResponse {
+  correlationId: string;
+  ok: false;
+  error: string;
+}
+
+type OPFSResponse<T> = SuccessResponse<T> | ErrorResponse;
+
+// ── Worker Singleton ──────────────────────────────────────────────────────────
+
+let worker: Worker | null = null;
+
+function getWorker(): Worker {
+  if (!worker) {
+    worker = new Worker(new URL("./opfs.worker.ts", import.meta.url));
+    worker.onerror = (event) => {
+      console.error("[OPFS Worker] Uncaught error:", event.message);
+      worker = null; // allow recreation on next call
+    };
+    attachResponseListener(worker);
+  }
+  return worker;
+}
+
+// ── Pending Promise Registry ──────────────────────────────────────────────────
+
+type PendingResolvers = {
+  resolve: (value: any) => void;
+  reject: (reason: any) => void;
+};
+
+const pending = new Map<string, PendingResolvers>();
+
+function attachResponseListener(w: Worker): void {
+  w.onmessage = (event: MessageEvent<OPFSResponse<any>>) => {
+    const { correlationId, ok } = event.data;
+    const resolvers = pending.get(correlationId);
+    if (!resolvers) return;
+    pending.delete(correlationId);
+    if (ok) {
+      resolvers.resolve((event.data as SuccessResponse<any>).data);
+    } else {
+      resolvers.reject(new Error((event.data as ErrorResponse).error));
+    }
+  };
+}
+
+// ── Send Helper ───────────────────────────────────────────────────────────────
+
+function send<T>(request: OPFSRequest): Promise<T> {
+  const w = getWorker();
+  return new Promise<T>((resolve, reject) => {
+    pending.set(request.correlationId, { resolve, reject });
+    w.postMessage(request);
+  });
+}
+
+// ── Public Interface ──────────────────────────────────────────────────────────
+
 interface IFileSystem {
-  init(): Promise<FileSystemDirectoryHandle>;
-  list(): Promise<FileSystemFileHandle[]>;
-  create(fileName: string, content: string): Promise<FileSystemFileHandle>;
-  read(fileHandle: FileSystemFileHandle): Promise<string>;
-  update(fileHandle: FileSystemFileHandle, content: string): Promise<void>;
+  init(): Promise<void>;
+  list(): Promise<string[]>;
+  create(fileName: string, content: string): Promise<string>;
+  read(fileName: string): Promise<string>;
+  update(fileName: string, content: string): Promise<void>;
   delete(fileName: string): Promise<void>;
 }
 
-/**
- * OPFS Implementation of the FileSystem interface
- */
 export const OPFSFileSystem: IFileSystem = {
-  async init(): Promise<FileSystemDirectoryHandle> {
-    if (!navigator.storage || !navigator.storage.getDirectory) {
-      throw new Error("OPFS is not supported in this browser.");
-    }
-    if (navigator.storage.persist) {
-      await navigator.storage.persist();
-    }
-    return await navigator.storage.getDirectory();
+  init() {
+    return send<void>({ correlationId: crypto.randomUUID(), type: "init" });
   },
 
-  async list(): Promise<FileSystemFileHandle[]> {
-    const root = await navigator.storage.getDirectory();
-    const entries: FileSystemFileHandle[] = [];
-    // @ts-ignore - values() is async iterable in modern browsers
-    for await (const entry of root.values()) {
-      if (entry.kind === "file" && !entry.name.startsWith(".")) {
-        entries.push(entry as FileSystemFileHandle);
-      }
-    }
-    return entries.sort((a, b) => a.name.localeCompare(b.name));
+  list() {
+    return send<string[]>({ correlationId: crypto.randomUUID(), type: "list" });
   },
 
-  async create(
-    fileName: string,
-    content: string,
-  ): Promise<FileSystemFileHandle> {
-    const root = await navigator.storage.getDirectory();
-    const fileHandle = await root.getFileHandle(fileName, { create: true });
-    const writable = await fileHandle.createWritable();
-    await writable.write(content);
-    await writable.close();
-    return fileHandle;
+  create(fileName, content) {
+    return send<string>({
+      correlationId: crypto.randomUUID(),
+      type: "create",
+      fileName,
+      content,
+    });
   },
 
-  async read(fileHandle: FileSystemFileHandle): Promise<string> {
-    const file = await fileHandle.getFile();
-    return await file.text();
+  read(fileName) {
+    return send<string>({
+      correlationId: crypto.randomUUID(),
+      type: "read",
+      fileName,
+    });
   },
 
-  async update(
-    fileHandle: FileSystemFileHandle,
-    content: string,
-  ): Promise<void> {
-    const writable = await fileHandle.createWritable();
-    await writable.write(content);
-    await writable.close();
+  update(fileName, content) {
+    return send<void>({
+      correlationId: crypto.randomUUID(),
+      type: "update",
+      fileName,
+      content,
+    });
   },
 
-  async delete(fileName: string): Promise<void> {
-    const root = await navigator.storage.getDirectory();
-    await root.removeEntry(fileName);
+  delete(fileName) {
+    return send<void>({
+      correlationId: crypto.randomUUID(),
+      type: "delete",
+      fileName,
+    });
   },
 };

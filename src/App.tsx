@@ -14,34 +14,7 @@ import {
   Eraser,
 } from "lucide-react";
 import { OPFSFileSystem } from "./OPFS";
-
-const WORDS: string[] = [
-  "apple",
-  "nebula",
-  "velocity",
-  "ocean",
-  "zenith",
-  "crystal",
-  "horizon",
-  "whisper",
-  "echo",
-  "midnight",
-  "glimmer",
-  "safari",
-  "ios",
-  "storage",
-  "performance",
-  "interface",
-  "coding",
-  "logic",
-  "creative",
-  "swift",
-  "reactive",
-  "filesystem",
-  "browser",
-  "private",
-  "origin",
-];
+import { WORDS } from "./const";
 
 interface LogEntry {
   id: number;
@@ -60,10 +33,8 @@ export const App: React.FC = () => {
   // Application State
   const [isInitialized, setIsInitialized] = useState<boolean>(false);
   const [isCompatible, setIsCompatible] = useState<boolean>(true);
-  const [files, setFiles] = useState<FileSystemFileHandle[]>([]);
-  const [currentFile, setCurrentFile] = useState<FileSystemFileHandle | null>(
-    null,
-  );
+  const [files, setFiles] = useState<string[]>([]);
+  const [currentFile, setCurrentFile] = useState<string | null>(null);
   const [content, setContent] = useState<string>("");
   const [lastModified, setLastModified] = useState<Date | null>(null);
   const [notifications, setNotifications] = useState<ToastNotification[]>([]);
@@ -163,18 +134,18 @@ export const App: React.FC = () => {
     const initialRandomContent = generateRandomContent();
 
     try {
-      const fileHandle = await OPFSFileSystem.create(
+      const createdName = await OPFSFileSystem.create(
         randomName,
         initialRandomContent,
       );
-      showToast(`Created ${randomName}`);
+      showToast(`Created ${createdName}`);
       addLog(
-        `Action: Created file "${randomName}" with random content`,
+        `Action: Created file "${createdName}" with random content`,
         "success",
       );
 
       await refreshFileList();
-      await loadFile(fileHandle);
+      await loadFile(createdName);
     } catch (error: any) {
       showToast("Create failed: " + error.message, "error");
       addLog(`Create Error: ${error.message}`, "error");
@@ -186,18 +157,17 @@ export const App: React.FC = () => {
   /**
    * CRUD: Read (Single File)
    */
-  const loadFile = async (fileHandle: FileSystemFileHandle) => {
+  const loadFile = async (fileName: string) => {
     try {
-      const text = await OPFSFileSystem.read(fileHandle);
-      const fileData = await fileHandle.getFile();
+      const text = await OPFSFileSystem.read(fileName);
 
-      setCurrentFile(fileHandle);
+      setCurrentFile(fileName);
       setContent(text);
-      setLastModified(new Date(fileData.lastModified));
-      addLog(`Action: Read file "${fileHandle.name}"`, "info");
+      setLastModified(new Date());
+      addLog(`Action: Read file "${fileName}"`, "info");
     } catch (error: any) {
       showToast("Load error", "error");
-      addLog(`Read Error for "${fileHandle.name}": ${error.message}`, "error");
+      addLog(`Read Error for "${fileName}": ${error.message}`, "error");
     }
   };
 
@@ -209,14 +179,13 @@ export const App: React.FC = () => {
     try {
       await OPFSFileSystem.update(currentFile, content);
 
-      const fileData = await currentFile.getFile();
-      setLastModified(new Date(fileData.lastModified));
+      setLastModified(new Date());
       showToast("File saved");
-      addLog(`Action: Updated content for "${currentFile.name}"`, "success");
+      addLog(`Action: Updated content for "${currentFile}"`, "success");
     } catch (error: any) {
       showToast("Save failed", "error");
       addLog(
-        `Update Error for "${currentFile.name}": ${error.message}`,
+        `Update Error for "${currentFile}": ${error.message}`,
         "error",
       );
     }
@@ -232,7 +201,7 @@ export const App: React.FC = () => {
       setContent(randomText);
       showToast("Randomized (unsaved)");
       addLog(
-        `Action: Randomized content in editor for "${currentFile.name}" (Click Save to persist)`,
+        `Action: Randomized content in editor for "${currentFile}" (Click Save to persist)`,
         "warning",
       );
     } catch (error: any) {
@@ -246,7 +215,7 @@ export const App: React.FC = () => {
    */
   const deleteFile = async () => {
     if (!currentFile) return;
-    const fileName = currentFile.name;
+    const fileName = currentFile;
     try {
       await OPFSFileSystem.delete(fileName);
 
@@ -377,12 +346,12 @@ export const App: React.FC = () => {
                   </p>
                 </div>
               ) : (
-                files.map((fileHandle) => (
+                files.map((fileName) => (
                   <button
-                    key={fileHandle.name}
-                    onClick={() => loadFile(fileHandle)}
+                    key={fileName}
+                    onClick={() => loadFile(fileName)}
                     className={`w-full text-left p-4 rounded-2xl transition-all flex items-center gap-4 group ${
-                      currentFile?.name === fileHandle.name
+                      currentFile === fileName
                         ? "bg-indigo-600 text-white shadow-lg shadow-indigo-100"
                         : "hover:bg-slate-50 text-slate-600 border border-transparent hover:border-slate-100"
                     }`}
@@ -390,13 +359,13 @@ export const App: React.FC = () => {
                     <FileText
                       size={18}
                       className={
-                        currentFile?.name === fileHandle.name
+                        currentFile === fileName
                           ? "text-indigo-200"
                           : "text-slate-400 group-hover:text-indigo-500"
                       }
                     />
                     <span className="text-sm font-bold truncate">
-                      {fileHandle.name}
+                      {fileName}
                     </span>
                   </button>
                 ))
@@ -427,7 +396,7 @@ export const App: React.FC = () => {
                     </div>
                     <div>
                       <h3 className="font-black text-slate-800 text-lg leading-tight">
-                        {currentFile.name}
+                        {currentFile}
                       </h3>
                       <div className="flex items-center gap-2 mt-1">
                         <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
